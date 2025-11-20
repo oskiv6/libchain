@@ -25,4 +25,6 @@ To run test you can just run: `./nob test`
 
 --- 
 
-You can learn more aboout this libary in `examples`
+You can learn more about this libary in `examples` and `DOC.md`
+
+---

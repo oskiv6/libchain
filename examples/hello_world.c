@@ -1,28 +1,26 @@
-#include "./../include/chain.h"
-
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#define CHAIN_IMPLEMENTATION
+#include "./../include/chain.h"
 
 int main () {
 
+    chain* c = to_chain("Hello, World");
+    c = chain_mod(c, "Test");
+    c = chain_mod(c, "Test1");
+    c = chain_mod(c, "Test2");
 
-    // initialization of the chain
-    chain* msg = to_chain("Hello, Worl");                   // o: Hello, Worl
-    printf("(test case): %s\n", chain_read(msg));
-    msg = chain_fmod(msg, INSERT, "d!", chain_len(msg), 2); // o: Hello, World!
+    chain* snap = chain_snapshot(c, 1);
+    snap = chain_mod(snap, "Test3");
 
-    // to finalize chain modifications, just use
-    char* cmsg = chain_read(msg);
-    printf("%s\n", cmsg);
+    c = chain_fmod(c, INSERT, " Developer", 5, 10);
 
-    // you can also modify whole buffer at once
-    msg = chain_mod(msg, "This is modification");
-    cmsg = chain_read(msg);
-    printf("%s\n", cmsg);
+    printf("%s\n", chain_stringify(c));
 
-    // and finally you can see a modification tree using debug tool
-    __chain_print_debug(msg);
+    chain_drop(c);
+    chain_drop(snap);
 
-
-    // remember to drop the chain
-    chain_drop(&msg);
 }

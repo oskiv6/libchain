@@ -81,7 +81,7 @@ implemnetation below
 
 */
 
-#ifdef CHAIN_IMPLEMENTATION
+//#ifdef CHAIN_IMPLEMENTATION
 
 #include <stdlib.h>
 #include <string.h>
@@ -106,7 +106,6 @@ typedef struct {
     ssize_t delta;
     bool is_delete;
     size_t refcount;
-    chain* parent;
 } patch;
 
 struct chain {
@@ -150,7 +149,7 @@ internals should be declared starting with '__' (double underscore)
 
 */
 
-chain** __CHAIN_FREE_QUEUE = NULL;
+chain* __CHAIN_FREE_QUEUE = NULL;
 size_t __CHAIN_QUEUE_ITEM_COUNT = 0;
 
 
@@ -159,26 +158,220 @@ static void  __chain_free(chain* c);
 static void __check_free_queue();
 static void  __grow_patches(chain* c);
 static size_t __str_len(const char* str);
+//static void __chain_ensure_unique_patches(chain* c);
+
 
 static chain* __chain_add_patch(chain* c, size_t idx, const char* content,
     size_t ins_len, size_t repl_len, bool is_delete);
 
 
-//static void __chain_ensure_unique_patches(chain* c);
-
-
-// profiling data
-// TODO: hide when -DCHAIN_PROFILER not found
+// optimization
+// TODO: hide when -DCHAIN_OPTIMIZATION not found
 static double __str_len_time = 0.0;
 
 
-// IMPL
+// C string length calculation
+static size_t __str_len(const char* str) {
+    CHAIN_ASSERT(str, "NULL string");
+
+    typedef size_t word;
+    const char* s = str;
+
+    const size_t wsize = sizeof(word);
+    const uintptr_t wmask = (uintptr_t)wsize - 1;
+
+    #ifdef TRACK_STRLEN_TIME
+        clock_t st = clock();
+    #endif
+
+    while (((uintptr_t)s & wmask) != 0) {
+        if (*s == 0) {
+        #ifdef TRACK_STRLEN_TIME
+            __str_len_time += (double)(clock() - st) / CLOCKS_PER_SEC;
+        #endif
+            return (size_t)(s - str);
+        }
+        s++;
+    }
+
+    const word lomagic = (word)(~(word)0) / 0xFF;
+    const word himagic = lomagic << 7;
+
+    const word* wp = (const word*)s;
+
+    for (;;) {
+        word v = *wp;
+        if (((v - lomagic) & ~v & himagic) != 0) {
+            const char* cp = (const char*)wp;
+            for (size_t i = 0; i < wsize; i++) {
+                if (cp[i] == 0) {
+                #ifdef TRACK_STRLEN_TIME
+                    __str_len_time += (double)(clock() - st) / CLOCKS_PER_SEC;
+                #endif
+                    return (size_t)((cp + i) - str);
+                }
+            }
+        }
+        wp++;
+    }
+}
+
 
 size_t chain_len(const chain* c) {
     CHAIN_ASSERT(c, "NULL chain");
 
     // VER 2
     return (c->final_length > 0)? c->final_length : 0;
+}
+
+
+double __get_strlen_time(void) {
+    return __str_len_time;
+}
+
+
+// arena allocator
+static void* __chain_alloc(chain* c, size_t size) {
+    CHAIN_ASSERT(c, "NULL chain");
+
+    size = (size + 7) & ~7; // align
+
+    if (c->ar.ptr + size > c->ar.end) {
+        size_t old_used = c->ar.ptr - c->ar.start;
+        size_t new_cap = c->ar.capacity * 2;
+        while (new_cap < old_used + size) new_cap *= 2;
+
+        char* newmem = malloc(new_cap);
+        CHAIN_ASSERT(newmem, "allocation failed");
+        memcpy(newmem, c->ar.start, old_used);
+        free(c->ar.start);
+
+        c->ar.start = newmem;
+        c->ar.ptr   = newmem + old_used;
+        c->ar.end   = newmem + new_cap;
+        c->ar.capacity = new_cap;
+    }
+
+    void* p = c->ar.ptr;
+    c->ar.ptr += size;
+    return p;
+}
+
+
+static void __chain_free(chain* c) {
+    CHAIN_ASSERT(c, "NULL chain");
+
+    free(c->ar.start);
+}
+
+static void __check_free_queue() {
+    if (__CHAIN_QUEUE_ITEM_COUNT == 0) return;
+
+    size_t write_idx = 0; // new position for surviving items
+
+    for (size_t i = 0; i < __CHAIN_QUEUE_ITEM_COUNT; i++) {
+        chain* c = &__CHAIN_FREE_QUEUE[i];
+
+        // skip chains whose arena is still used
+        if (c->ar.is_arena_used) {
+            __CHAIN_FREE_QUEUE[write_idx++] = *c;
+            continue;
+        }
+
+        bool patch_in_use = false;
+        for (size_t j = 0; j < c->patch_count; j++) {
+            patch* p = &c->patches[j];
+            if (p->refcount > 0) {
+                patch_in_use = true;
+                break;
+            }
+        }
+
+        if (patch_in_use) {
+            __CHAIN_FREE_QUEUE[write_idx++] = *c;
+            continue;
+        }
+
+        // free the chain's arena and patches
+        __chain_free(c);
+        free(c);
+    }
+
+    // update queue count
+    __CHAIN_QUEUE_ITEM_COUNT = write_idx;
+
+    // shrink queue array if desired
+    __CHAIN_FREE_QUEUE = realloc(__CHAIN_FREE_QUEUE, write_idx * sizeof(chain));
+}
+
+
+
+// patch management
+static void __grow_patches(chain* c) {
+    CHAIN_ASSERT(c, "NULL chain");
+
+    if (c->patch_count < c->patch_cap) return;
+
+    size_t new_cap = c->patch_cap * 2;
+    patch* newarr = __chain_alloc(c, new_cap * sizeof(patch));
+    memcpy(newarr, c->patches, c->patch_count * sizeof(patch));
+
+    c->patches = newarr;
+    c->patch_cap = new_cap;
+}
+
+
+// static void __chain_ensure_unique_patches(chain* c) {
+//     CHAIN_ASSERT(c, "NULL chain");
+
+//     if (*c->patch_refcount == 1) return;
+
+//     patch* newarr = __chain_alloc(c, sizeof(patch) * c->patch_cap);
+//     memcpy(newarr, c->patches, sizeof(patch) * c->patch_count);
+
+//     (*c->patch_refcount)--;
+
+//     c->patches = newarr;
+//     c->patch_refcount = __chain_alloc(c, sizeof(size_t));
+//     *c->patch_refcount = 1;
+// }
+
+
+static chain* __chain_add_patch(chain* c, size_t idx, const char* content, size_t ins_len,
+        size_t repl_len, bool is_delete) {
+
+    CHAIN_ASSERT(c, "NULL chain");
+    if (!is_delete) {
+        CHAIN_ASSERT(content, "NULL string");
+    }
+
+     //__chain_ensure_unique_patches(c);
+
+    size_t cl = c->final_length;
+    if (idx > cl) idx = cl;
+    if (repl_len > cl - idx) repl_len = cl - idx;
+
+    __grow_patches(c);
+
+    patch* p = &c->patches[c->patch_count++];
+    p->idx = idx;
+    p->len = ins_len;
+    p->replaced_len = repl_len;
+    p->delta = (ssize_t)ins_len - (ssize_t)repl_len;
+    p->is_delete = is_delete;
+
+    if (!is_delete && ins_len) {
+        p->data = __chain_alloc(c, ins_len + 1);
+        memcpy(p->data, content, ins_len);
+        p->data[ins_len] = 0;
+    } else {
+        p->data = NULL;
+    }
+    c->final_length += p->delta;
+
+    return c;
+
+
 }
 
 
@@ -276,11 +469,6 @@ chain* chain_fmod(chain* c, cmod flag, const char* content, size_t pos, size_t l
 char* chain_stringify(chain* c) {
     CHAIN_ASSERT(c, "NULL chain");
 
-    #ifdef CHAIN_PROFILER
-        clock_t st, et;
-        st = clock();
-    #endif
-
     size_t final_len = c->final_length;
     char* out = __chain_alloc(c, final_len + 1);
     if (!out) abort();
@@ -310,13 +498,6 @@ char* chain_stringify(chain* c) {
 
     out[cur_len] = 0;
 
-    #ifdef CHAIN_PROFILER
-        et = clock();
-
-        fprintf(stderr, "\n(profiler) > chain_stringify (profiler):\n");
-        fprintf(stderr, "(profiler) > - execution time: %.6f\n\n", (double)(et - st) / CLOCKS_PER_SEC);
-
-    #endif
     return out;
 }
 
@@ -341,13 +522,11 @@ chain* chain_snapshot(chain* c, size_t version) {
     s->patch_cap = version + 2;
     s->patch_count = 0;
     s->patches = __chain_alloc(s, sizeof(patch) * s->patch_cap);
-    memset(s->patches, 0, sizeof(patch) * s->patch_count);
 
     // compute final_length
     size_t len = c->base_len;
     for (size_t i = 0; i < version && i < c->patch_count; i++) {
         s->patches[i] = c->patches[i];
-        c->patches[i].refcount++;
         len = len - c->patches[i].replaced_len + c->patches[i].len;
     }
     s->patch_count = version;
@@ -379,7 +558,6 @@ bool chain_ccmp(chain* c, const char* s) {
     return eq;
 }
 
-
 bool chain_cmp(chain* a, chain* b) {
     CHAIN_ASSERT(a, "NULL chain (first arg)");
     CHAIN_ASSERT(b, "NULL chain (second arg)");
@@ -391,221 +569,33 @@ bool chain_cmp(chain* a, chain* b) {
     return eq;
 }
 
-
 // free chain
 void chain_drop(chain* c) {
     CHAIN_ASSERT(c, "NULL chain");
 
+    __check_free_queue();
+
     c->ar.is_arena_used = false;
 
-    bool pass_to_queue = false;
     for (size_t i = 0; i < c->patch_count; i++) {
         patch* p = &c->patches[i];
-        if (p->refcount > 0) p->refcount--;
 
-        if (!pass_to_queue && p->refcount > 0) {
-            pass_to_queue = true;
+        if (p->refcount > 0) {
+
+            // whole chain goes into free queue
+            __CHAIN_FREE_QUEUE = realloc(__CHAIN_FREE_QUEUE, sizeof(chain) * ++__CHAIN_QUEUE_ITEM_COUNT);
+            __CHAIN_FREE_QUEUE[__CHAIN_QUEUE_ITEM_COUNT - 1] = *c;
+
+            return; // cannot free
         }
     }
 
-    if (!pass_to_queue) {
-        __chain_free(c);
-        free(c);
-    } else {
-        // push pointer instead of struct
-        __CHAIN_FREE_QUEUE = realloc(__CHAIN_FREE_QUEUE, sizeof(chain*) * (__CHAIN_QUEUE_ITEM_COUNT + 1));
-        __CHAIN_FREE_QUEUE[__CHAIN_QUEUE_ITEM_COUNT++] = c;
-    }
-
-    // check free queue now — some previously blocked chains may be freed
-    __check_free_queue();
+    // all patch references are 0 and arena is not used
+    __chain_free(c);
+    free(c);
 }
 
-// ==== INTERNAL FUNCTIONS
-/* declared with '__' (double underscore) */
-
-static void __grow_patches(chain* c) {
-    CHAIN_ASSERT(c, "NULL chain");
-
-    if (c->patch_count < c->patch_cap) return;
-
-    size_t new_cap = c->patch_cap * 2;
-    patch* newarr = __chain_alloc(c, new_cap * sizeof(patch));
-    memcpy(newarr, c->patches, c->patch_count * sizeof(patch));
-
-    c->patches = newarr;
-    c->patch_cap = new_cap;
-}
-
-
-static chain* __chain_add_patch(chain* c, size_t idx, const char* content, size_t ins_len,
-        size_t repl_len, bool is_delete) {
-
-    CHAIN_ASSERT(c, "NULL chain");
-    if (!is_delete) {
-        CHAIN_ASSERT(content, "NULL string");
-    }
-
-     //__chain_ensure_unique_patches(c);
-
-    size_t cl = c->final_length;
-    if (idx > cl) idx = cl;
-    if (repl_len > cl - idx) repl_len = cl - idx;
-
-    __grow_patches(c);
-
-    patch* p = &c->patches[c->patch_count++];
-    p->idx = idx;
-    p->len = ins_len;
-    p->replaced_len = repl_len;
-    p->delta = (ssize_t)ins_len - (ssize_t)repl_len;
-    p->is_delete = is_delete;
-    p->refcount = 1;
-
-    if (!is_delete && ins_len) {
-        p->data = __chain_alloc(c, ins_len + 1);
-        memcpy(p->data, content, ins_len);
-        p->data[ins_len] = 0;
-    } else {
-        p->data = NULL;
-    }
-    c->final_length += p->delta;
-
-    p->parent = c;
-
-    return c;
-}
-
-
-double __get_strlen_time(void) {
-    return __str_len_time;
-}
-
-
-// C string length calculation
-static size_t __str_len(const char* str) {
-    CHAIN_ASSERT(str, "NULL string");
-
-    typedef size_t word;
-    const char* s = str;
-
-    const size_t wsize = sizeof(word);
-    const uintptr_t wmask = (uintptr_t)wsize - 1;
-
-    #ifdef TRACK_STRLEN_TIME
-        clock_t st = clock();
-    #endif
-
-    while (((uintptr_t)s & wmask) != 0) {
-        if (*s == 0) {
-        #ifdef TRACK_STRLEN_TIME
-            __str_len_time += (double)(clock() - st) / CLOCKS_PER_SEC;
-        #endif
-            return (size_t)(s - str);
-        }
-        s++;
-    }
-
-    const word lomagic = (word)(~(word)0) / 0xFF;
-    const word himagic = lomagic << 7;
-
-    const word* wp = (const word*)s;
-
-    for (;;) {
-        word v = *wp;
-        if (((v - lomagic) & ~v & himagic) != 0) {
-            const char* cp = (const char*)wp;
-            for (size_t i = 0; i < wsize; i++) {
-                if (cp[i] == 0) {
-                #ifdef TRACK_STRLEN_TIME
-                    __str_len_time += (double)(clock() - st) / CLOCKS_PER_SEC;
-                #endif
-                    return (size_t)((cp + i) - str);
-                }
-            }
-        }
-        wp++;
-    }
-}
-
-
-// ==== MEMORY MANAGEMENT
-
-// arena allocator
-static void* __chain_alloc(chain* c, size_t size) {
-    CHAIN_ASSERT(c, "NULL chain");
-
-    size = (size + 7) & ~7; // align
-
-    if (c->ar.ptr + size > c->ar.end) {
-        size_t old_used = c->ar.ptr - c->ar.start;
-        size_t new_cap = c->ar.capacity * 2;
-        while (new_cap < old_used + size) new_cap *= 2;
-
-        char* newmem = malloc(new_cap);
-        CHAIN_ASSERT(newmem, "allocation failed");
-        memcpy(newmem, c->ar.start, old_used);
-        free(c->ar.start);
-
-        c->ar.start = newmem;
-        c->ar.ptr   = newmem + old_used;
-        c->ar.end   = newmem + new_cap;
-        c->ar.capacity = new_cap;
-    }
-
-    void* p = c->ar.ptr;
-    c->ar.ptr += size;
-    return p;
-}
-
-
-static void __chain_free(chain* c) {
-    CHAIN_ASSERT(c, "NULL chain");
-
-    free(c->ar.start);
-}
-
-
-static void __check_free_queue() {
-
-    if (__CHAIN_QUEUE_ITEM_COUNT == 0) return;
-
-    size_t write_idx = 0;
-
-    for (size_t i = 0; i < __CHAIN_QUEUE_ITEM_COUNT; i++) {
-        chain* c = __CHAIN_FREE_QUEUE[i];
-
-        if (c->ar.is_arena_used) {
-            __CHAIN_FREE_QUEUE[write_idx++] = c;
-            continue;
-        }
-
-        bool patch_in_use = false;
-        for (size_t j = 0; j < c->patch_count; j++) {
-            patch* p = &c->patches[j];
-            if (p->refcount != 0) p->refcount--;
-            if (p->refcount > 0) {
-                patch_in_use = true;
-                break;
-            }
-        }
-
-        if (patch_in_use) {
-            __CHAIN_FREE_QUEUE[write_idx++] = c;
-            continue;
-        }
-
-
-        __chain_free(c);
-        free(c);
-    }
-
-    __CHAIN_QUEUE_ITEM_COUNT = write_idx;
-    __CHAIN_FREE_QUEUE = realloc(__CHAIN_FREE_QUEUE, write_idx * sizeof(chain*));
-}
-
-
-// ==== DEBUG
+// debug
 static void __print_bytes(const char* d, size_t len) {
     for (size_t i = 0; i < len; i++) {
         unsigned char c = (unsigned char)d[i];
@@ -649,20 +639,18 @@ void __chain_print_debug(chain* c) {
     }
 
     // print patches
-    size_t depth = 0;
-    for (size_t i = c->patch_count; i > 0; i--) {
-        __chain_print_patch(&c->patches[i - 1], depth++);
+    for (size_t i = 0; i < c->patch_count; i++) {
+        __chain_print_patch(&c->patches[i], i);
     }
 
     // BASE line
-    for (size_t i = 0; i < depth; i++) printf("   ");
     printf("   └── BASE(\"");
     if (c->base_len && c->base_str)
         __print_bytes(c->base_str, c->base_len);
     printf("\")\n");
 }
 
-#endif /* CHAIN_IMPLEMENTATION */
+//#endif /* CHAIN_IMPLEMENTATION */
 #endif /* CHAIN_H */
 
 /*
