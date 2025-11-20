@@ -2,14 +2,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+#define CHAIN_IMPLEMENTATION
 #include "../include/chain.h"
 
 // silent equality check
 static int check_str(const char* expected, chain* ch) {
-    char* s = chain_read(ch);
+    char* s = chain_stringify(ch);
     if (!s) return 0;
     int match = (strcmp(s, expected) == 0);
-    free(s);
     return match;
 }
 
@@ -34,62 +35,53 @@ int main(void) {
         chain* c1 = to_chain("Hello, Chain!");
         check_str("Hello, Chain!", c1);
         check_len(13, c1);
-        chain_drop(&c1);
+        chain_drop(c1);
     }
 
     {
         chain* e = to_chain(NULL);
         check_str("", e);
         check_len(0, e);
-        chain_drop(&e);
+        chain_drop(e);
     }
 
-    {
-        chain* base = to_chain("alive");
-        chain* r1 = chain_ref(base);
-        chain* r2 = chain_ref(base);
-        chain_drop(&r1);
-        chain_drop(&r2);
-        check_str("alive", base);
-        chain_drop(&base);
-    }
 
     {
         chain* s = to_chain("Old text");
         CHAIN_REASSIGN(s, chain_mod(s, "New text"));
         CHAIN_REASSIGN(s, chain_mod(s, "Successful modification"));
-        chain_drop(&s);
+        chain_drop(s);
     }
 
     {
         chain* s = to_chain("World");
         CHAIN_REASSIGN(s, chain_fmod(s, INSERT, "Hello, ", 0, 0));
-        chain_drop(&s);
+        chain_drop(s);
     }
 
     {
         chain* s = to_chain("Hello, World");
         size_t len = chain_len(s);
         CHAIN_REASSIGN(s, chain_fmod(s, INSERT, "!", len, 0));
-        chain_drop(&s);
+        chain_drop(s);
     }
 
     {
         chain* s = to_chain("Hello, World!");
         CHAIN_REASSIGN(s, chain_fmod(s, REPLACE, " from chain!", 5, 11));
-        chain_drop(&s);
+        chain_drop(s);
     }
 
     {
         chain* s = to_chain("Hello, World!");
         CHAIN_REASSIGN(s, chain_fmod(s, DELETE, "", 5, 7));
-        chain_drop(&s);
+        chain_drop(s);
     }
 
     {
         chain* s = to_chain("Hello, World!");
         CHAIN_REASSIGN(s, chain_fmod(s, REPLACE, "Chain", 7, 6));
-        chain_drop(&s);
+        chain_drop(s);
     }
 
     {
@@ -101,37 +93,37 @@ int main(void) {
         CHAIN_REASSIGN(s, chain_fmod(s, REPLACE, "Chain", 7, 5));
         CHAIN_REASSIGN(s, chain_fmod(s, DELETE, NULL, 5, 8));
         CHAIN_REASSIGN(s, chain_fmod(s, INSERT, ", Chain", 5, 7));
-        chain_drop(&s);
+        chain_drop(s);
     }
 
     {
         chain* s = to_chain("Hello, Chain!");
         chain* copy = chain_copy(s);
         CHAIN_REASSIGN(s, chain_mod(s, "modified"));
-        chain_drop(&copy);
-        chain_drop(&s);
+        chain_drop(copy);
+        chain_drop(s);
     }
 
     {
         chain* a = to_chain("test123");
         chain* b = to_chain("test123");
-        chain_ccpy(a, "test123");
-        chain_ccpy(a, "wrong");
-        chain_cpy(a, b);
-        chain_drop(&a);
-        chain_drop(&b);
+        chain_ccmp(a, "test123");
+        chain_ccmp(a, "wrong");
+        chain_cmp(a, b);
+        chain_drop(a);
+        chain_drop(b);
     }
 
     {
         chain* fresh = chain_fmod(NULL, INSERT, "from nothing", 0, 0);
-        chain_drop(&fresh);
+        chain_drop(fresh);
     }
 
     {
         chain* shorty = to_chain("hi");
         chain* safe = chain_fmod(shorty, INSERT, "x", 100, 0);
-        chain_drop(&safe);
-        chain_drop(&shorty);
+        chain_drop(safe);
+        chain_drop(shorty);
     }
 
     {
@@ -142,15 +134,14 @@ int main(void) {
             char buf[32];
             snprintf(buf, sizeof(buf), "p%d ", i);
             chain* new_cur = chain_fmod(cur, INSERT, buf, chain_len(cur), 0);
-            if (cur != root) chain_drop(&cur);
+            if (cur != root) chain_drop(cur);
             cur = new_cur;
         }
 
-        char* final = chain_read(cur);
-        free(final);
+        char* final = chain_stringify(cur);
 
-        chain_drop(&root);
-        chain_drop(&cur);
+        chain_drop(root);
+        chain_drop(cur);
     }
 
     {
@@ -158,13 +149,13 @@ int main(void) {
         CHAIN_REASSIGN(s, chain_fmod(s, INSERT, "X", 0, 0));
         CHAIN_REASSIGN(s, chain_fmod(s, INSERT, "Y", 4, 0));
         CHAIN_REASSIGN(s, chain_fmod(s, REPLACE, "123", 1, 3));
-        chain_drop(&s);
+        chain_drop(s);
     }
 
     {
         chain* e = to_chain("");
         CHAIN_REASSIGN(e, chain_fmod(e, INSERT, "hello", 0, 0));
-        chain_drop(&e);
+        chain_drop(e);
     }
 
     clock_t end_time = clock();
