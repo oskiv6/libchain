@@ -10,18 +10,14 @@ A small, portable C library implementing a chain-of-patches text model. Provides
 
 ---
 
-## Build instructions
+# Building & using
 
-1. "clang nob.c -o nob"
-2. "./nob build"
+Chain is distributed as two files:
+- chain.h      → put in your include path
+- chain.c      → compile with the rest of your project
 
----
+No configuration, no macros to define, only CHAIN_IMPLEMENTATION in exactly one translation unit.
 
-## Test instructions
-
-The build system compiles `test/unit.c` into executable, you can modify this file to perform some test. 
-
-To run test you can just run: `./nob test`
 
 --- 
 
