@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Build test
         run: |
-          cc  -o test test/global_test.c
+          cc  -o test test/global_test.c -I include/
       - name: Run test
         run: ./test
 
@@ -31,6 +31,6 @@ jobs:
 
       - name: Build test
         run: |
-          ${{ matrix.cc }} -o test test/global_test.c
+          ${{ matrix.cc }} -o test test/global_test.c -I include/
       - name: Run test
         run: ./test
