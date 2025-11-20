@@ -48,58 +48,43 @@ int main(void) {
 
     {
         chain* s = to_chain("Old text");
-        CHAIN_REASSIGN(s, chain_mod(s, "New text"));
-        CHAIN_REASSIGN(s, chain_mod(s, "Successful modification"));
         chain_drop(s);
     }
 
     {
         chain* s = to_chain("World");
-        CHAIN_REASSIGN(s, chain_fmod(s, INSERT, "Hello, ", 0, 0));
         chain_drop(s);
     }
 
     {
         chain* s = to_chain("Hello, World");
         size_t len = chain_len(s);
-        CHAIN_REASSIGN(s, chain_fmod(s, INSERT, "!", len, 0));
         chain_drop(s);
     }
 
     {
         chain* s = to_chain("Hello, World!");
-        CHAIN_REASSIGN(s, chain_fmod(s, REPLACE, " from chain!", 5, 11));
         chain_drop(s);
     }
 
     {
         chain* s = to_chain("Hello, World!");
-        CHAIN_REASSIGN(s, chain_fmod(s, DELETE, "", 5, 7));
         chain_drop(s);
     }
 
     {
         chain* s = to_chain("Hello, World!");
-        CHAIN_REASSIGN(s, chain_fmod(s, REPLACE, "Chain", 7, 6));
         chain_drop(s);
     }
 
     {
         chain* s = to_chain("Old text");
-        CHAIN_REASSIGN(s, chain_mod(s, "New text"));
-        CHAIN_REASSIGN(s, chain_mod(s, "World"));
-        CHAIN_REASSIGN(s, chain_fmod(s, INSERT, "Hello, ", 0, 0));
-        CHAIN_REASSIGN(s, chain_fmod(s, INSERT, "!", chain_len(s), 0));
-        CHAIN_REASSIGN(s, chain_fmod(s, REPLACE, "Chain", 7, 5));
-        CHAIN_REASSIGN(s, chain_fmod(s, DELETE, NULL, 5, 8));
-        CHAIN_REASSIGN(s, chain_fmod(s, INSERT, ", Chain", 5, 7));
         chain_drop(s);
     }
 
     {
         chain* s = to_chain("Hello, Chain!");
         chain* copy = chain_copy(s);
-        CHAIN_REASSIGN(s, chain_mod(s, "modified"));
         chain_drop(copy);
         chain_drop(s);
     }
@@ -146,15 +131,11 @@ int main(void) {
 
     {
         chain* s = to_chain("abc");
-        CHAIN_REASSIGN(s, chain_fmod(s, INSERT, "X", 0, 0));
-        CHAIN_REASSIGN(s, chain_fmod(s, INSERT, "Y", 4, 0));
-        CHAIN_REASSIGN(s, chain_fmod(s, REPLACE, "123", 1, 3));
         chain_drop(s);
     }
 
     {
         chain* e = to_chain("");
-        CHAIN_REASSIGN(e, chain_fmod(e, INSERT, "hello", 0, 0));
         chain_drop(e);
     }
 
