@@ -10,7 +10,10 @@
 static int check_str(const char* expected, chain* ch) {
     char* s = chain_stringify(ch);
     if (!s) return 0;
-    return strcmp(s, expected) == 0;
+
+    bool test = strcmp(s, expected) == 0;
+    free(s);
+    return test;
 }
 
 // silent length check
@@ -94,6 +97,7 @@ int main(void) {
 
         char* final = chain_stringify(cur);
         (void)final;
+        free(final);
 
         chain_drop(root);
     }

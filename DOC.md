@@ -93,20 +93,25 @@ size_t chain_len(const chain* c);
 
 /*
     Converts a chain into a null-terminated C string.
-
-    The returned pointer refers to memory inside the chain’s arena.
-    It stays valid until the chain is modified or dropped.
-
-    The chain owns this buffer. Do not free it manually.
-
-    To obtain an independent heap-allocated string, use:
     
-        `char* temp = malloc(chain_len(c) + 1);
-        memcpy(temp, chain_stringify(c), chain_len(c) + 1);`
-
-    A dedicated function `chain_mstringify()` will later handle
-    this automatically by returning a heap-allocated buffer that the
-    caller is responsible for freeing.
+    String returned by this function is allocated by `malloc`. Caller must free it manually.
+    (v0.2.1 -- quick solution untill appropriate memory model idea).
+    
+    ==== v0.2.1 THE FOLLOWING INFORMATION IS OUTDATED
+    |
+    | The returned pointer refers to memory inside the chain’s arena.
+    | It stays valid until the chain is modified or dropped.
+    |
+    | To obtain an independent heap-allocated string, use:
+    | 
+    |     `char* temp = malloc(chain_len(c) + 1);
+    |    memcpy(temp, chain_stringify(c), chain_len(c) + 1);`
+    | 
+    | A dedicated function `chain_mstringify()` will later handle
+    | this automatically by returning a heap-allocated buffer that the
+    | caller is responsible for freeing.
+    |
+    ==== v0.2.1
 */
 char* chain_stringify(const chain* c);                                      
 
