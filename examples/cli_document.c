@@ -29,7 +29,7 @@ int main() {
 
         if (strncmp(input, "/undo", 5) == 0) {
             // simple undo: remove last patch
-            if (doc->patch_count > 0) doc->patch_count--;
+            if (doc->array_count > 0) doc->array_count--;
         } else if (strncmp(input, "/replace", 8) == 0) {
             size_t pos, rlen;
             char newtext[256];

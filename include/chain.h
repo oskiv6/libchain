@@ -93,24 +93,38 @@ implemnetation below
 typedef struct {
     char* start;
     char* ptr;
+    size_t current_offset;
     char* end;
     size_t capacity;
     bool is_arena_used;
 } chain_arena;
 
 typedef struct {
-    size_t idx;
+
+    /*
+    offset - patch offset
+    data_offset - data_offset
+
+    offsts are used to calculate data placement based on start pointer
+
+    */
+
+    //size_t offset;
+
     char*  data;
+
+    size_t idx;
     size_t len;
     size_t replaced_len;
     ssize_t delta;
     bool is_delete;
     size_t refcount;
-    chain* parent;
+    //chain* parent;
 } patch;
 
 struct chain {
-    char* base_str;
+    //char* base_str;
+    char* base_data;
     size_t base_len;
 
     /*
@@ -133,9 +147,10 @@ struct chain {
     chain_arena ar;
     bool is_arena_owner_alive;      // is the chain alive?
 
-    patch* patches;
-    size_t patch_count;
-    size_t patch_cap;
+    // patch* patches;                 // patch array
+    patch** array;
+    size_t array_count;
+    size_t array_capacity;
 
     size_t final_length;
 };
@@ -157,7 +172,7 @@ size_t __CHAIN_QUEUE_ITEM_COUNT = 0;
 static void* __chain_alloc(chain* c, size_t size);
 static void  __chain_free(chain* c);
 static void __check_free_queue();
-static void  __grow_patches(chain* c);
+static void  __grow_array(chain* c);
 static size_t __str_len(const char* str);
 
 static chain* __chain_add_patch(chain* c, size_t idx, const char* content,
@@ -186,27 +201,26 @@ size_t chain_len(const chain* c) {
 chain* to_chain(const char* s) {
     CHAIN_ASSERT(s, "NULL string");
 
-    chain* c = malloc(sizeof(chain));
+    chain* c = (chain*)malloc(sizeof(chain));
     memset(c, 0, sizeof(chain));
 
     // arena init
     c->ar.capacity = 1024;
-    c->ar.start = malloc(1024);
+    c->ar.start =  (char*)malloc(1024);
     c->ar.ptr = c->ar.start;
     c->ar.end = c->ar.start + 1024;
     c->ar.is_arena_used = true;
 
     size_t len = strlen(s);
 
-    c->base_str = __chain_alloc(c, len + 1);
-    memcpy(c->base_str, s, len + 1);
+    c->base_data = (char*)malloc(len + 1);
+    memcpy(c->base_data, s, len + 1);
     c->base_len = len;
 
-    c->patch_cap = 4;
-    c->patch_count = 0;
-    c->patches = __chain_alloc(c, sizeof(patch) * 4);
-
-
+    c->array = (patch**)malloc(sizeof(patch*) * 4);
+    memset(c->array, 0, sizeof(patch*) * 4);
+    c->array_capacity = 4;
+    c->array_count = 0;
 
     c->final_length = len;
 
@@ -282,14 +296,14 @@ char* chain_stringify(chain* c) {
     #endif
 
     size_t final_len = c->final_length;
-    char* out = __chain_alloc(c, final_len + 1);
+    char* out = (char*)malloc(final_len + 1);
     if (!out) abort();
 
     size_t cur_len = c->base_len;
-    memcpy(out, c->base_str, c->base_len);
+    memcpy(out, c->base_data, c->base_len);
 
-    for (size_t i = 0; i < c->patch_count; i++) {
-        const patch* p = &c->patches[i];
+    for (size_t i = 0; i < c->array_count; i++) {
+        const patch* p = c->array[i];
 
         size_t pos = p->idx;
         if (pos > cur_len) pos = cur_len;
@@ -325,32 +339,32 @@ char* chain_stringify(chain* c) {
 chain* chain_snapshot(chain* c, size_t version) {
     CHAIN_ASSERT(c, "NULL chain");
 
-    chain* s = malloc(sizeof(chain));
+    chain* s = (chain*)malloc(sizeof(chain));
     CHAIN_ASSERT(s, "allocation failed");
     memset(s, 0, sizeof(chain));
 
     // arena init
     s->ar.capacity = 1024;
-    s->ar.start = malloc(1024);
+    s->ar.start = (char*)malloc(1024);
     s->ar.ptr = s->ar.start;
     s->ar.end = s->ar.start + 1024;
 
     s->base_len = c->base_len;
-    s->base_str = c->base_str;
+    s->base_data = c->base_data;
 
-    s->patch_cap = version + 2;
-    s->patch_count = 0;
-    s->patches = __chain_alloc(s, sizeof(patch) * s->patch_cap);
-    memset(s->patches, 0, sizeof(patch) * s->patch_count);
+    s->array_capacity = version + 2;
+    s->array_count = 0;
+    s->array = (patch**)malloc(sizeof(patch*) * s->array_capacity);
+    memset(s->array, 0, sizeof(patch*) * s->array_capacity);
 
     // compute final_length
     size_t len = c->base_len;
-    for (size_t i = 0; i < version && i < c->patch_count; i++) {
-        s->patches[i] = c->patches[i];
-        c->patches[i].refcount++;
-        len = len - c->patches[i].replaced_len + c->patches[i].len;
+    for (size_t i = 0; i < version && i < c->array_count; i++) {
+        s->array[i] = c->array[i];
+        c->array[i]->refcount++;
+        len = len - c->array[i]->replaced_len + c->array[i]->len;
     }
-    s->patch_count = version;
+    s->array_count = version;
     s->final_length = len;
 
     return s;
@@ -362,6 +376,7 @@ chain* chain_copy(chain* c) {
 
     char* flat = chain_stringify(c);
     chain* nc = to_chain(flat);
+    free(flat);
     return nc;
 }
 
@@ -376,6 +391,7 @@ bool chain_ccmp(chain* c, const char* s) {
 
     char* flat = chain_stringify(c);
     int eq = memcmp(flat, s, sl) == 0;
+    free(flat);
     return eq;
 }
 
@@ -388,6 +404,9 @@ bool chain_cmp(chain* a, chain* b) {
     char* af = chain_stringify(a);
     char* bf = chain_stringify(b);
     int eq = memcmp(af, bf, chain_len(a)) == 0;
+
+    free(af);
+    free(bf);
     return eq;
 }
 
@@ -396,47 +415,61 @@ bool chain_cmp(chain* a, chain* b) {
 void chain_drop(chain* c) {
     CHAIN_ASSERT(c, "NULL chain");
 
-    c->ar.is_arena_used = false;
-
-    bool pass_to_queue = false;
-    for (size_t i = 0; i < c->patch_count; i++) {
-        patch* p = &c->patches[i];
+    // Decrement refcounts for patches and free those with refcount == 0
+    for (size_t i = 0; i < c->array_count; i++) {
+        patch* p = c->array[i];
+        if (!p) continue;
         if (p->refcount > 0) p->refcount--;
-
-        if (!pass_to_queue && p->refcount > 0) {
-            pass_to_queue = true;
+        if (p->refcount == 0) {
+            // free p->data and p
+            if (p->data) free(p->data);
+            free(p);
+            c->array[i] = NULL; // optional
         }
     }
 
-    if (!pass_to_queue) {
-        __chain_free(c);
-        free(c);
-    } else {
-        // push pointer instead of struct
-        __CHAIN_FREE_QUEUE = realloc(__CHAIN_FREE_QUEUE, sizeof(chain*) * (__CHAIN_QUEUE_ITEM_COUNT + 1));
-        __CHAIN_FREE_QUEUE[__CHAIN_QUEUE_ITEM_COUNT++] = c;
+    // free the array of patch pointers
+    if (c->array) {
+        free(c->array);
+        c->array = NULL;
     }
 
-    // check free queue now — some previously blocked chains may be freed
-    __check_free_queue();
+    // free base string
+    if (c->base_data) {
+        free(c->base_data);
+        c->base_data = NULL;
+    }
+
+    // free arena backing store if allocated earlier (defensive)
+    if (c->ar.start) {
+        free(c->ar.start);
+        c->ar.start = NULL;
+    }
+
+    // finally free the chain itself
+    free(c);
 }
 
 // ==== INTERNAL FUNCTIONS
 /* declared with '__' (double underscore) */
 
-static void __grow_patches(chain* c) {
+static void __grow_array(chain* c) {
     CHAIN_ASSERT(c, "NULL chain");
 
-    if (c->patch_count < c->patch_cap) return;
+    if (c->array_count < c->array_capacity) return;
 
-    size_t new_cap = c->patch_cap * 2;
-    patch* newarr = __chain_alloc(c, new_cap * sizeof(patch));
-    memcpy(newarr, c->patches, c->patch_count * sizeof(patch));
+    size_t new_cap = (c->array_capacity == 0) ? 4 : c->array_capacity * 2;
+    patch** new_array = (patch**)realloc(c->array, new_cap * sizeof(patch*));
+    if (!new_array) abort();
 
-    c->patches = newarr;
-    c->patch_cap = new_cap;
+    // zero new slots (optional, good for debugging)
+    if (new_cap > c->array_capacity) {
+        memset(new_array + c->array_capacity, 0, (new_cap - c->array_capacity) * sizeof(patch*));
+    }
+
+    c->array = new_array;
+    c->array_capacity = new_cap;
 }
-
 
 static chain* __chain_add_patch(chain* c, size_t idx, const char* content, size_t ins_len,
         size_t repl_len, bool is_delete) {
@@ -446,15 +479,22 @@ static chain* __chain_add_patch(chain* c, size_t idx, const char* content, size_
         CHAIN_ASSERT(content, "NULL string");
     }
 
-     //__chain_ensure_unique_patches(c);
-
+    // clamp
     size_t cl = c->final_length;
     if (idx > cl) idx = cl;
     if (repl_len > cl - idx) repl_len = cl - idx;
 
-    __grow_patches(c);
+    __grow_array(c);
 
-    patch* p = &c->patches[c->patch_count++];
+    // allocate a new patch struct inside arena
+    patch* p = (patch*)malloc(sizeof(patch));
+    if (!p) abort();
+    memset(p, 0, sizeof(patch));
+
+    // store pointer into array and increase count
+    c->array[c->array_count++] = p;
+
+    // fill patch fields
     p->idx = idx;
     p->len = ins_len;
     p->replaced_len = repl_len;
@@ -463,15 +503,16 @@ static chain* __chain_add_patch(chain* c, size_t idx, const char* content, size_
     p->refcount = 1;
 
     if (!is_delete && ins_len) {
-        p->data = __chain_alloc(c, ins_len + 1);
+        p->data = (char*)malloc(ins_len + 1);
         memcpy(p->data, content, ins_len);
-        p->data[ins_len] = 0;
+        p->data[ins_len] = '\0';
     } else {
-        p->data = NULL;
+        // allocate a single byte (empty string) to keep interface consistent
+        p->data = (char*)malloc(1);
+        p->data[0] = '\0';
     }
-    c->final_length += p->delta;
 
-    p->parent = c;
+    c->final_length += p->delta;
 
     return c;
 }
@@ -542,7 +583,7 @@ static void* __chain_alloc(chain* c, size_t size) {
         size_t new_cap = c->ar.capacity * 2;
         while (new_cap < old_used + size) new_cap *= 2;
 
-        char* newmem = malloc(new_cap);
+        char* newmem = (char*)malloc(new_cap);
         CHAIN_ASSERT(newmem, "allocation failed");
         memcpy(newmem, c->ar.start, old_used);
         free(c->ar.start);
@@ -558,6 +599,20 @@ static void* __chain_alloc(chain* c, size_t size) {
     return p;
 }
 
+
+//
+static void* __chain_get_ptr(chain* c, size_t offset) {
+    CHAIN_ASSERT(c, "NULL chain");
+    CHAIN_ASSERT(offset <= (size_t)(c->ar.ptr - c->ar.start), "invalid offset");
+    return c->ar.start + offset;
+}
+
+
+static size_t __chain_get_offset(chain* c, void* ptr) {
+    CHAIN_ASSERT(c, "NULL chain");
+    CHAIN_ASSERT(ptr >= (void*)c->ar.start && ptr <= (void*)c->ar.ptr, "pointer out of arena");
+    return (char*)ptr - c->ar.start;
+}
 
 static void __chain_free(chain* c) {
     CHAIN_ASSERT(c, "NULL chain");
@@ -581,8 +636,8 @@ static void __check_free_queue() {
         }
 
         bool patch_in_use = false;
-        for (size_t j = 0; j < c->patch_count; j++) {
-            patch* p = &c->patches[j];
+        for (size_t j = 0; j < c->array_count; j++) {
+            patch* p = c->array[j];
             if (p->refcount != 0) p->refcount--;
             if (p->refcount > 0) {
                 patch_in_use = true;
@@ -596,12 +651,12 @@ static void __check_free_queue() {
         }
 
 
-        __chain_free(c);
+        //__chain_free(c);
         free(c);
     }
 
     __CHAIN_QUEUE_ITEM_COUNT = write_idx;
-    __CHAIN_FREE_QUEUE = realloc(__CHAIN_FREE_QUEUE, write_idx * sizeof(chain*));
+    __CHAIN_FREE_QUEUE = (chain**)realloc(__CHAIN_FREE_QUEUE, write_idx * sizeof(chain*));
 }
 
 
@@ -650,15 +705,15 @@ void __chain_print_debug(chain* c) {
 
     // print patches
     size_t depth = 0;
-    for (size_t i = c->patch_count; i > 0; i--) {
-        __chain_print_patch(&c->patches[i - 1], depth++);
+    for (size_t i = c->array_count; i > 0; i--) {
+        __chain_print_patch(c->array[i - 1], depth++);
     }
 
     // BASE line
     for (size_t i = 0; i < depth; i++) printf("   ");
     printf("   └── BASE(\"");
-    if (c->base_len && c->base_str)
-        __print_bytes(c->base_str, c->base_len);
+    if (c->base_len && c->base_data)
+        __print_bytes(c->base_data, c->base_len);
     printf("\")\n");
 }
 
