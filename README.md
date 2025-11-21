@@ -12,6 +12,8 @@ A small, portable C library implementing a chain-of-patches text model. Provides
 
 # Building & using
 
+You can find chain.h in `include` direcotry 
+
 Chain is distributed as two files:
 - chain.h      → put in your include path
 
