@@ -82,7 +82,7 @@ FINAL ← PATCH3 ← PATCH2 ← PATCH1 ← BASE
 
 When you modify a chain you get a **new** chain handle that shares almost all nodes with the old one. When the last handle to a particular version is dropped, the whole unreachable patch chain is freed in a single arena reset — essentially **O(1) cleanup**.
 
-## Public API (current version v0.2)
+## Public API (current version v0.2.1)
 
 ```c
 // create a chain from null-terminated string
@@ -91,27 +91,20 @@ chain* to_chain(const char* s);
 // get chain (text) length
 size_t chain_len(const chain* c);
 
-/*
+/* v0.3
     Converts a chain into a null-terminated C string.
     
-    String returned by this function is allocated by `malloc`. Caller must free it manually.
-    (v0.2.1 -- quick solution untill appropriate memory model idea).
+    The returned pointer refers to memory inside the chain’s arena.
+    It stays valid until the chain is dropped.
     
-    ==== v0.2.1 THE FOLLOWING INFORMATION IS OUTDATED
-    |
-    | The returned pointer refers to memory inside the chain’s arena.
-    | It stays valid until the chain is modified or dropped.
-    |
-    | To obtain an independent heap-allocated string, use:
-    | 
-    |     `char* temp = malloc(chain_len(c) + 1);
-    |    memcpy(temp, chain_stringify(c), chain_len(c) + 1);`
-    | 
-    | A dedicated function `chain_mstringify()` will later handle
-    | this automatically by returning a heap-allocated buffer that the
-    | caller is responsible for freeing.
-    |
-    ==== v0.2.1
+    To obtain an independent heap-allocated string, use:
+     
+    `char* temp = malloc(chain_len(c) + 1);
+    memcpy(temp, chain_stringify(c), chain_len(c) + 1);`
+ 
+    A dedicated function `chain_mstringify()` will later handle
+    this automatically by returning a heap-allocated buffer that the
+    caller is responsible for freeing.
 */
 char* chain_stringify(const chain* c);                                      
 
@@ -146,10 +139,13 @@ Chain is distributed as two files:
 
 No configuration, no macros to define, only CHAIN_IMPLEMENTATION in exactly one translation unit.
 
+
 ---
 
 ### Roadmap
 
+- Profiler: Execution Time and memory usage
+- Better Test Unit
 - High-level modification functions:
   1. chain_replace()
   2. chain_insert()

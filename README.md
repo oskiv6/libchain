@@ -4,17 +4,15 @@ A small, portable C library implementing a chain-of-patches text model. Provides
 ----
 
 ## Platform support:
-- macOS (arm64)
-- linux (test not performed)
+- macOS (passing)
+- linux (passing)
 - Windows (test not performed)
 
 ---
 
 # Building & using
 
-You can find chain.h in `include` direcotry 
-
-Chain is distributed as two files:
+Chain is distributed as single header library:
 - chain.h      → put in your include path
 
 No configuration, no macros to define, only CHAIN_IMPLEMENTATION in exactly one translation unit.
