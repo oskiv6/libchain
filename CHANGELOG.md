@@ -1,4 +1,11 @@
                         |
+v0.3    (2025-11-26)    | memory model refinement
+                        | profiler preparation
+                        | some functions got renamed -> `__arena_alloc`
+                        | test/global_test.c -> test/unit.c
+                        | DEBUG PRINTER OUTDATED
+                        | README.md and DOC.md modifications
+                        | 
 v0.2.1  (2025-11-21)    | `__chain_alloc` memory model suspended
                         | `chain_stringify` modification, read DOCUMENTATION
                         | temporary usage of `malloc`, may result in memory leaks
